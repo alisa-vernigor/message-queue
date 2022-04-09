@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package pathfinder;
+
+option go_package = "github.com/alisa-vernigor/message-queue/proto/pathfinder;pathfinder";
+
+service PathFinder {
+    rpc GetPath(GetPathRequest) returns (GetPathResponse);
+}
+
+message GetPathRequest {
+    string start_link = 1;
+    string finish_link = 2;
+}
+
+message GetPathResponse {
+    int64 path_length = 1;
+    repeated string path = 2;
+}
