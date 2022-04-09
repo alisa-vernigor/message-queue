@@ -5,14 +5,24 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sync"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 
-	pb "github.com/alisa-vernigor/message-queue/proto/pathfinder"
+	"github.com/alisa-vernigor/message-queue/internal/queue"
 	"github.com/streadway/amqp"
+	"google.golang.org/protobuf/proto"
+
+	pb "github.com/alisa-vernigor/message-queue/proto/pathfinder"
 )
 
-type pathFinder struct{}
+type pathFinder struct {
+	pb.UnimplementedPathFinderServer
+	channels map[string]chan *pb.GetPathResponse
+	queues   queue.Queues
+	mu       sync.RWMutex
+}
 
 func failOnError(err error, msg string) {
 	if err != nil {
@@ -21,7 +31,47 @@ func failOnError(err error, msg string) {
 }
 
 func (p *pathFinder) GetPath(c context.Context, req *pb.GetPathRequest) (*pb.GetPathResponse, error) {
-	return nil, nil
+	id := uuid.New().String()
+	ch := make(chan *pb.GetPathResponse)
+
+	p.mu.Lock()
+	p.channels[id] = ch
+	p.mu.Unlock()
+
+	body, err := proto.Marshal(req)
+	req.Uuid = id
+
+	if err != nil {
+		return nil, err
+	}
+
+	p.queues.Ch.Publish(
+		"",     // exchange
+		"task", // routing key
+		false,  // mandatory
+		false,  // immediate
+		amqp.Publishing{
+			DeliveryMode: amqp.Persistent,
+			ContentType:  "text/plain",
+			Body:         body,
+		},
+	)
+
+	resp := <-ch
+
+	return resp, nil
+}
+
+func newPathFinder() *pathFinder {
+	var path pathFinder
+
+	path.queues = queue.NewQueues("amqp://guest:guest@localhost:5672/")
+	path.channels = make(map[string]chan *pb.GetPathResponse)
+	path.mu = sync.RWMutex{}
+
+	go path.respGetter()
+
+	return &path
 }
 
 func get_adress() string {
@@ -36,28 +86,31 @@ func get_adress() string {
 	return ipAddress.IP.String()
 }
 
+func (p *pathFinder) respGetter() {
+	msgs, err := p.queues.Ch.Consume(
+		"result", // queue
+		"",       // consumer
+		true,     // auto-ack
+		false,    // exclusive
+		false,    // no-local
+		false,    // no-wait
+		nil,      // args
+	)
+	failOnError(err, "Failed to register a consumer")
+	for d := range msgs {
+		var resp pb.GetPathResponse
+		proto.Unmarshal(d.Body, &resp)
+
+		p.mu.Lock()
+		p.channels[resp.GetUuid()] <- &resp
+		p.mu.Unlock()
+	}
+}
+
 func main() {
 	var lis net.Listener
 	var err error
 	var addr string
-
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
-	failOnError(err, "Failed to connect to RabbitMQ")
-	defer conn.Close()
-
-	ch, err := conn.Channel()
-	failOnError(err, "Failed to open a channel")
-	defer ch.Close()
-
-	q, err := ch.QueueDeclare(
-		"hello", // name
-		false,   // durable
-		false,   // delete when unused
-		false,   // exclusive
-		false,   // no-wait
-		nil,     // arguments
-	)
-	failOnError(err, "Failed to declare a queue")
 
 	for {
 		addr = "9090"
@@ -73,7 +126,7 @@ func main() {
 
 	s := grpc.NewServer()
 
-	pb.RegisterChatRoomServer(s, &pathFinder{})
+	pb.RegisterPathFinderServer(s, newPathFinder())
 
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)

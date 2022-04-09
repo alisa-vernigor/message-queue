@@ -1,8 +1,9 @@
 syntax = "proto3";
 
-package pathfinder;
 
-option go_package = "github.com/alisa-vernigor/message-queue/proto/pathfinder;pathfinder";
+option go_package = "github.com/alisa-vernigor/message-queue/proto/pathfinder";
+
+package pathfinder;
 
 service PathFinder {
     rpc GetPath(GetPathRequest) returns (GetPathResponse);
@@ -11,9 +12,11 @@ service PathFinder {
 message GetPathRequest {
     string start_link = 1;
     string finish_link = 2;
+    string uuid = 3;
 }
 
 message GetPathResponse {
     int64 path_length = 1;
     repeated string path = 2;
+    string uuid = 3;
 }

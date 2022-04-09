@@ -2,10 +2,13 @@ package main
 
 import (
 	"log"
-	"strconv"
 
-	"github.com/alisa-vernigor/soa-message-queues/internal/grabber"
+	"github.com/alisa-vernigor/message-queue/internal/grabber"
+	"github.com/alisa-vernigor/message-queue/internal/queue"
 	"github.com/streadway/amqp"
+	"google.golang.org/protobuf/proto"
+
+	pb "github.com/alisa-vernigor/message-queue/proto/pathfinder"
 )
 
 func failOnError(err error, msg string) {
@@ -14,106 +17,102 @@ func failOnError(err error, msg string) {
 	}
 }
 
-func bfs() (int64, error) {
-	grabber.Grab("a", "b")
+func reverse(arr []string) []string {
+	for i := 0; i < len(arr)/2; i++ {
+		j := len(arr) - i - 1
+		arr[i], arr[j] = arr[j], arr[i]
+	}
+	return arr
 }
 
-func receiveQueue() {
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
-	failOnError(err, "Failed to connect to RabbitMQ")
-	defer conn.Close()
+func bfs(start string, finish string) (int, []string, error) {
+	if start == finish {
+		return 0, []string{start}, nil
+	}
 
-	ch, err := conn.Channel()
-	failOnError(err, "Failed to open a channel")
-	defer ch.Close()
+	prev := make(map[string]string)
+	var queue []string
 
-	q, err := ch.QueueDeclare(
-		"task", // name
-		false,  // durable
-		false,  // delete when unused
-		false,  // exclusive
-		false,  // no-wait
-		nil,    // arguments
-	)
-	failOnError(err, "Failed to declare a queue")
+	queue = append(queue, start)
 
-	msgs, err := ch.Consume(
-		q.Name, // queue
-		"",     // consumer
-		true,   // auto-ack
-		false,  // exclusive
-		false,  // no-local
-		false,  // no-wait
-		nil,    // args
-	)
-	failOnError(err, "Failed to register a consumer")
+	foundFinish := false
 
-	forever := make(chan bool)
+	for len(queue) > 0 {
+		top := queue[0]
 
-	go func() {
-		for d := range msgs {
-			log.Printf("Received a message: %s", d.Body)
+		neighbours, err := grabber.Grab(top)
+		if err != nil {
+			return 0, nil, err
 		}
-	}()
 
-	log.Printf(" [*] Waiting for messages. To exit press CTRL+C")
-	<-forever
-}
+		for _, neighbour := range neighbours {
+			if _, ok := prev[neighbour]; !ok {
+				prev[neighbour] = top
+			}
+			if neighbour == finish {
+				foundFinish = true
+				break
+			}
+		}
 
-func sendQueue() {
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
-	failOnError(err, "Failed to connect to RabbitMQ")
-	defer conn.Close()
-
-	ch, err := conn.Channel()
-	failOnError(err, "Failed to open a channel")
-	defer ch.Close()
-
-	q, err := ch.QueueDeclare(
-		"result", // name
-		false,    // durable
-		false,    // delete when unused
-		true,     // exclusive
-		false,    // noWait
-		nil,      // arguments
-	)
-	failOnError(err, "Failed to declare a queue")
-
-	msgs, err := ch.Consume(
-		q.Name, // queue
-		"",     // consumer
-		true,   // auto-ack
-		false,  // exclusive
-		false,  // no-local
-		false,  // no-wait
-		nil,    // args
-	)
-	failOnError(err, "Failed to register a consumer")
-
-	err = ch.Publish(
-		"",          // exchange
-		"rpc_queue", // routing key
-		false,       // mandatory
-		false,       // immediate
-		amqp.Publishing{
-			ContentType:   "text/plain",
-			CorrelationId: corrId,
-			ReplyTo:       q.Name,
-			Body:          []byte(strconv.Itoa(n)),
-		})
-	failOnError(err, "Failed to publish a message")
-
-	for d := range msgs {
-		if corrId == d.CorrelationId {
-			res, err = strconv.Atoi(string(d.Body))
-			failOnError(err, "Failed to convert body to integer")
+		if foundFinish {
 			break
 		}
 	}
 
-	return
+	var path []string
+	cur := finish
+	for cur != start {
+		path = append(path, cur)
+		cur = prev[cur]
+	}
+	path = append(path, start)
+	return len(path), reverse(path), nil
 }
 
 func main() {
+	queues := queue.NewQueues("amqp://guest:guest@localhost:5672/")
 
+	msgs, err := queues.Ch.Consume(
+		"task", // queue
+		"",     // consumer
+		true,   // auto-ack
+		false,  // exclusive
+		false,  // no-local
+		false,  // no-wait
+		nil,    // args
+	)
+	failOnError(err, "Failed to register a consumer")
+	for d := range msgs {
+		var req pb.GetPathRequest
+		proto.Unmarshal(d.Body, &req)
+
+		len, path, err := bfs(req.StartLink, req.FinishLink)
+		if err != nil {
+			failOnError(err, "can't find path")
+		}
+
+		var resp pb.GetPathResponse
+		resp.Path = path
+		resp.PathLength = int64(len)
+		resp.Uuid = req.Uuid
+
+		body, err := proto.Marshal(&resp)
+
+		if err != nil {
+			failOnError(err, "can't find path")
+		}
+
+		queues.Ch.Publish(
+			"",       // exchange
+			"result", // routing key
+			false,    // mandatory
+			false,    // immediate
+			amqp.Publishing{
+				DeliveryMode: amqp.Persistent,
+				ContentType:  "text/plain",
+				Body:         body,
+			},
+		)
+	}
 }
