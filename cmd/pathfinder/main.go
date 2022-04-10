@@ -74,7 +74,7 @@ func (p *pathFinder) GetPath(c context.Context, req *pb.GetPathRequest) (*pb.Get
 func newPathFinder() *pathFinder {
 	var path pathFinder
 
-	path.queues = queue.NewQueues("amqp://guest:guest@localhost:5672/")
+	path.queues = queue.NewQueues("amqp://guest:guest@rabbitmq:5672/")
 	path.channels = make(map[string]chan *pb.GetPathResponse)
 	path.mu = sync.RWMutex{}
 

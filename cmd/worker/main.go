@@ -84,7 +84,7 @@ func main() {
 	defer f.Close()
 
 	log.SetOutput(f)
-	queues := queue.NewQueues("amqp://guest:guest@localhost:5672/")
+	queues := queue.NewQueues("amqp://guest:guest@rabbitmq:5672/")
 
 	msgs, err := queues.Ch.Consume(
 		"task", // queue

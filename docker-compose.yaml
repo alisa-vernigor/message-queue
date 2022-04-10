@@ -1,0 +1,21 @@
+  services:
+    rabbitmq:
+      image: rabbitmq:3-management
+
+      ports:
+        - 15672:15672
+        - 5672:5672
+
+    worker:
+      image: alllisyonok/worker
+      depends_on:
+        - rabbitmq
+      ports:
+        - '9000:9000'
+
+    pathfinder:
+      image: alllisyonok/pathfinder
+      depends_on:
+        - rabbitmq
+        - worker
+        
