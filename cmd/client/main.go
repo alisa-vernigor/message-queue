@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -37,6 +38,12 @@ func main() {
 
 	c := pb.NewPathFinderClient(conn)
 
+	log.Println(url1, '\n', url2)
+	log.Println("Ready to request server")
+
 	resp, err := c.GetPath(context.Background(), &pb.GetPathRequest{StartLink: url1, FinishLink: url2})
+
+	log.Println("Succses!")
+
 	fmt.Printf("%s, %d hops\n", strings.Join(resp.Path, " => "), resp.GetPathLength())
 }

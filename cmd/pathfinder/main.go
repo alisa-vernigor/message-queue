@@ -31,20 +31,25 @@ func failOnError(err error, msg string) {
 }
 
 func (p *pathFinder) GetPath(c context.Context, req *pb.GetPathRequest) (*pb.GetPathResponse, error) {
+	log.Println("Got request:", req.StartLink, '\n', req.FinishLink)
+
 	id := uuid.New().String()
+	log.Println("uuid:", id)
+
 	ch := make(chan *pb.GetPathResponse)
 
 	p.mu.Lock()
 	p.channels[id] = ch
 	p.mu.Unlock()
 
-	body, err := proto.Marshal(req)
 	req.Uuid = id
+	body, err := proto.Marshal(req)
 
 	if err != nil {
 		return nil, err
 	}
 
+	log.Println("Ready to publish to queue")
 	p.queues.Ch.Publish(
 		"",     // exchange
 		"task", // routing key
@@ -57,7 +62,11 @@ func (p *pathFinder) GetPath(c context.Context, req *pb.GetPathRequest) (*pb.Get
 		},
 	)
 
+	log.Println("Published, waiting for response")
+
 	resp := <-ch
+
+	log.Println("Got response, returning!")
 
 	return resp, nil
 }
@@ -87,6 +96,7 @@ func get_adress() string {
 }
 
 func (p *pathFinder) respGetter() {
+
 	msgs, err := p.queues.Ch.Consume(
 		"result", // queue
 		"",       // consumer
@@ -98,11 +108,16 @@ func (p *pathFinder) respGetter() {
 	)
 	failOnError(err, "Failed to register a consumer")
 	for d := range msgs {
+
 		var resp pb.GetPathResponse
 		proto.Unmarshal(d.Body, &resp)
 
+		log.Println("Got ans:", resp.Uuid)
+
 		p.mu.Lock()
+		log.Println("Write to channel")
 		p.channels[resp.GetUuid()] <- &resp
+		log.Println("Wrote to channel")
 		p.mu.Unlock()
 	}
 }

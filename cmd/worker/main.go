@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"github.com/alisa-vernigor/message-queue/internal/grabber"
 	"github.com/alisa-vernigor/message-queue/internal/queue"
@@ -26,6 +27,7 @@ func reverse(arr []string) []string {
 }
 
 func bfs(start string, finish string) (int, []string, error) {
+	log.Println("Starting bfs!")
 	if start == finish {
 		return 0, []string{start}, nil
 	}
@@ -39,8 +41,11 @@ func bfs(start string, finish string) (int, []string, error) {
 
 	for len(queue) > 0 {
 		top := queue[0]
+		queue = queue[1:]
 
 		neighbours, err := grabber.Grab(top)
+		//log.Println("Got links:", neighbours)
+
 		if err != nil {
 			return 0, nil, err
 		}
@@ -48,14 +53,17 @@ func bfs(start string, finish string) (int, []string, error) {
 		for _, neighbour := range neighbours {
 			if _, ok := prev[neighbour]; !ok {
 				prev[neighbour] = top
+				queue = append(queue, neighbour)
 			}
 			if neighbour == finish {
+				log.Println("Found answer, breaking!")
 				foundFinish = true
 				break
 			}
 		}
 
 		if foundFinish {
+			log.Println("Found answer, breaking!")
 			break
 		}
 	}
@@ -67,10 +75,15 @@ func bfs(start string, finish string) (int, []string, error) {
 		cur = prev[cur]
 	}
 	path = append(path, start)
+	log.Println("Returning from bfs!")
 	return len(path), reverse(path), nil
 }
 
 func main() {
+	f, err := os.OpenFile("testlogfile", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	defer f.Close()
+
+	log.SetOutput(f)
 	queues := queue.NewQueues("amqp://guest:guest@localhost:5672/")
 
 	msgs, err := queues.Ch.Consume(
@@ -85,12 +98,17 @@ func main() {
 	failOnError(err, "Failed to register a consumer")
 	for d := range msgs {
 		var req pb.GetPathRequest
+
 		proto.Unmarshal(d.Body, &req)
+
+		log.Println("Got request:", req.StartLink, '\n', req.FinishLink)
+		log.Println("Ready for bfs!")
 
 		len, path, err := bfs(req.StartLink, req.FinishLink)
 		if err != nil {
 			failOnError(err, "can't find path")
 		}
+		log.Println("Found answer!")
 
 		var resp pb.GetPathResponse
 		resp.Path = path
@@ -103,6 +121,8 @@ func main() {
 			failOnError(err, "can't find path")
 		}
 
+		log.Println("Ready to push to queue!")
+
 		queues.Ch.Publish(
 			"",       // exchange
 			"result", // routing key
@@ -114,5 +134,6 @@ func main() {
 				Body:         body,
 			},
 		)
+		log.Println("Oushed to queue")
 	}
 }
