@@ -13,6 +13,8 @@ import (
 )
 
 func main() {
+
+	grpc.WithBlock()
 	var conn *grpc.ClientConn
 	var err error
 	reader := bufio.NewReader(os.Stdin)
@@ -42,6 +44,9 @@ func main() {
 	log.Println("Ready to request server")
 
 	resp, err := c.GetPath(context.Background(), &pb.GetPathRequest{StartLink: url1, FinishLink: url2})
+	if err != nil {
+		log.Fatal(err.Error())
+	}
 
 	log.Println("Succses!")
 

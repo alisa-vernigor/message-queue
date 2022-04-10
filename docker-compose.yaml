@@ -7,15 +7,15 @@
         - 5672:5672
 
     worker:
-      image: alllisyonok/worker
+      image: allisyonok/worker
       depends_on:
         - rabbitmq
-      ports:
-        - '9000:9000'
 
     pathfinder:
-      image: alllisyonok/pathfinder
+      image: allisyonok/pathfinder
       depends_on:
         - rabbitmq
         - worker
+      ports:
+        - '9000:9000'
         
