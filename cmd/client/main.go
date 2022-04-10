@@ -50,5 +50,5 @@ func main() {
 
 	log.Println("Succses!")
 
-	fmt.Printf("%s, %d hops\n", strings.Join(resp.Path, " => "), resp.GetPathLength())
+	fmt.Printf("%s, %d hops\n", strings.Join(resp.Path, " => "), resp.GetPathLength()-1)
 }
